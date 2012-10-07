@@ -1,3 +1,3 @@
 CC = nvcc
 knn:
-	$(CC) -o knn knn.cu
+	$(CC) -o knn.o knn.cu
