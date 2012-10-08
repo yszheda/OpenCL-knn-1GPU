@@ -13,10 +13,9 @@
 #define INIT_MAX 100
 void showResult(int m, int k, int *out);
 
-// extern __shared__ int D[];
+extern __shared__ int D[];
 
-__device__ void computeDist(int m, int n, int *V, int *D)
-// __device__ void computeDist(int m, int n, int *V)
+__device__ void computeDist(int m, int n, int *V)
 {
 	int i=blockIdx.x;
    	int j=threadIdx.x;
@@ -29,8 +28,7 @@ __device__ void computeDist(int m, int n, int *V, int *D)
 	D[i*m+j] = dist;
 }
 
-__global__ void knn(int m, int n, int k, int *V, int *out, int *D)
-// __global__ void knn(int m, int n, int k, int *V, int *out)
+__global__ void knn(int m, int n, int k, int *V, int *out)
 {
 	int i,j;
 	int dim;
@@ -41,8 +39,7 @@ __global__ void knn(int m, int n, int k, int *V, int *out, int *D)
 	int is_duplicate;
 //	__shared__ int D[m*m];
 
-	computeDist(m, n, V, D);
-//	computeDist(m, n, V);
+	computeDist(m, n, V);
 	__syncthreads();
 	// let the first thread select the k-min dist
 	i = blockIdx.x;
@@ -107,7 +104,7 @@ int main(int argc, char *argv[])
 	int *V, *out;				//host copies
 	int *d_V, *d_out;			//device copies
 	
-	int *D;						//will be replaced with shared memory
+//	int *D;						//will be replaced with shared memory
 
 	FILE *fp;
 	if(argc != 2)
@@ -130,7 +127,7 @@ int main(int argc, char *argv[])
 		cudaMalloc((void **)&d_V, m*n*sizeof(int));
 		cudaMalloc((void **)&d_out, m*k*sizeof(int));
 
-		cudaMalloc((void **)&D, m*m*sizeof(int));
+//		cudaMalloc((void **)&D, m*m*sizeof(int));
 
 		for(i=0; i<m*n; i++)
 		{
@@ -139,7 +136,7 @@ int main(int argc, char *argv[])
 		
 		cudaMemcpy(d_V, V, m*n*sizeof(int), cudaMemcpyHostToDevice);
 
-		knn<<<m, m, m*m*sizeof(int)>>>(m, n, k, d_V, d_out, D);
+		knn<<<m, m, m*m*sizeof(int)>>>(m, n, k, d_V, d_out);
 
 		cudaMemcpy(out, d_out, m*k*sizeof(int), cudaMemcpyDeviceToHost);
 
