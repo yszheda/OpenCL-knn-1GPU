@@ -1,10 +1,3 @@
-#include<stdio.h>
-#include<cuda.h>
-#include<stdlib.h>
-
-#define INIT_MAX 100
-void showResult(int m, int k, int *out);
-
 /* 
 * m: total num of points
 * n: n dimensions
@@ -13,40 +6,79 @@ void showResult(int m, int k, int *out);
 * out: k nearest neighbors
 */
 
-__global__ void knn(int m, int n, int k, int *V, int *out)
+#include<stdio.h>
+#include<cuda.h>
+#include<stdlib.h>
+
+#define INIT_MAX 100
+void showResult(int m, int k, int *out);
+
+// extern __shared__ int D[];
+
+__device__ void computeDist(int m, int n, int *V, int *D)
+// __device__ void computeDist(int m, int n, int *V)
+{
+	int i=blockIdx.x;
+   	int j=threadIdx.x;
+	int k;
+	int dist = 0;
+	for(k=0; k<n; k++)
+	{
+		dist += (V[i*n+k]-V[j*n+k])*(V[i*n+k]-V[j*n+k]);
+	}
+	D[i*m+j] = dist;
+}
+
+__global__ void knn(int m, int n, int k, int *V, int *out, int *D)
+// __global__ void knn(int m, int n, int k, int *V, int *out)
 {
 	int i,j;
 	int dim;
 	int temp;
 	int sum;
 	int count;
-	int last_idx;
-//	for(i=0; i<m; i++)
-//	{
-	  i = blockIdx.x;
-		temp = INIT_MAX;
-		last_idx = i;
+	int num;
+	int is_duplicate;
+//	__shared__ int D[m*m];
+
+	computeDist(m, n, V, D);
+//	computeDist(m, n, V);
+	__syncthreads();
+	// let the first thread select the k-min dist
+	i = blockIdx.x;
+	if(threadIdx.x == 0)
+	{
 		for(count=0; count<k; count++)
 		{
+			temp = INIT_MAX;
 			for(j=0; j<m; j++)
 			{
-				sum = 0;
-				if(j != last_idx && j != i)
+				is_duplicate = 0;
+
+				if(j == i)
 				{
-					for(dim=0; dim<n; dim++)
+					is_duplicate = 1;
+				}
+				
+				for(num=0; num<count; num++)
+				{
+					if(out[i*k+num] == j)
 					{
-						sum+=(V[i*n+dim]-V[j*n+dim])*(V[i*n+dim]-V[j*n+dim]);
+						is_duplicate = 1;
 					}
-					if(sum < temp)
+				}
+	
+				if(!is_duplicate)
+				{
+					if(D[i*m+j] < temp)
 					{
-						temp = sum;
+						temp = D[i*m+j];
 						out[i*k+count] = j;
-						last_idx = j;
 					}
 				}
 			}
 		}
-//	}
+	}
 }
 
 void showResult(int m, int k, int *out)
@@ -72,8 +104,11 @@ int main(int argc, char *argv[])
 { 
 	int m,n,k;
 	int i;
-	int *V, *out;					//host copies
+	int *V, *out;				//host copies
 	int *d_V, *d_out;			//device copies
+	
+	int *D;						//will be replaced with shared memory
+
 	FILE *fp;
 	if(argc != 2)
 	{
@@ -95,6 +130,8 @@ int main(int argc, char *argv[])
 		cudaMalloc((void **)&d_V, m*n*sizeof(int));
 		cudaMalloc((void **)&d_out, m*k*sizeof(int));
 
+		cudaMalloc((void **)&D, m*m*sizeof(int));
+
 		for(i=0; i<m*n; i++)
 		{
 			fscanf(fp, "%d", &V[i]);
@@ -102,7 +139,7 @@ int main(int argc, char *argv[])
 		
 		cudaMemcpy(d_V, V, m*n*sizeof(int), cudaMemcpyHostToDevice);
 
-		knn<<<m,1>>>(m, n, k, d_V, d_out);
+		knn<<<m, m, m*m*sizeof(int)>>>(m, n, k, d_V, d_out, D);
 
 		cudaMemcpy(out, d_out, m*k*sizeof(int), cudaMemcpyDeviceToHost);
 
