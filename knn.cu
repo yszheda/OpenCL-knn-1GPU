@@ -17,15 +17,39 @@ extern __shared__ int D[];
 
 __device__ void computeDist(int m, int n, int *V)
 {
-	int i=blockIdx.x;
-   	int j=threadIdx.x;
+	int i=threadIdx.x;
+   	int j=threadIdx.y;
 	int k;
 	int dist = 0;
-	for(k=0; k<n; k++)
+	//reduce duplications
+	if(i < j)
 	{
-		dist += (V[i*n+k]-V[j*n+k])*(V[i*n+k]-V[j*n+k]);
+		for(k=0; k<n; k++)
+		{
+			dist += (V[i*n+k]-V[j*n+k])*(V[i*n+k]-V[j*n+k]);
+		}
 	}
 	D[i*m+j] = dist;
+}
+
+//paralle reduction?
+//cannot use D now!
+__device__ int prmin(int m, int *D, int *R)
+{
+	int j = threadIdx.y;
+	int s = blockDim.y/2;
+	R[j] = j;
+	__syncthreads();
+	for(s=blockDim.y; s>0; s>>=1)
+	{
+		if(j < s)
+		{
+			D[j] = D[j]<D[j+s]? D[j]: D[j+s]; 
+			R[j] = R[j]<R[j+s]? R[j]: R[j+s]; 
+		}
+		__syncthreads();
+	}
+	return R[0];
 }
 
 __global__ void knn(int m, int n, int k, int *V, int *out)
@@ -36,14 +60,15 @@ __global__ void knn(int m, int n, int k, int *V, int *out)
 	int sum;
 	int count;
 	int num;
+	int dist;
 	int is_duplicate;
 //	__shared__ int D[m*m];
 
 	computeDist(m, n, V);
 	__syncthreads();
 	// let the first thread select the k-min dist
-	i = blockIdx.x;
-	if(threadIdx.x == 0)
+	i = threadIdx.x;
+	if(threadIdx.y == 0)
 	{
 		for(count=0; count<k; count++)
 		{
@@ -67,9 +92,17 @@ __global__ void knn(int m, int n, int k, int *V, int *out)
 	
 				if(!is_duplicate)
 				{
-					if(D[i*m+j] < temp)
+					if(i < j)
 					{
-						temp = D[i*m+j];
+						dist = D[i*m+j];
+					}
+					else
+					{
+						dist = D[j*m+i];
+					}
+					if(dist < temp)
+					{
+						temp = dist;
 						out[i*k+count] = j;
 					}
 				}
@@ -85,15 +118,15 @@ void showResult(int m, int k, int *out)
 	{
 		for(j=0; j<k; j++)
 		{
-				printf("%d", out[i*k+j]);
-				if(j == k-1)
-				{
-						printf("\n");
-				}
-				else
-				{
-						printf(" ");
-				}
+			printf("%d", out[i*k+j]);
+			if(j == k-1)
+			{
+				printf("\n");
+			}
+			else
+			{
+				printf(" ");
+			}
 		}
 	} 
 } 
@@ -136,7 +169,8 @@ int main(int argc, char *argv[])
 		
 		cudaMemcpy(d_V, V, m*n*sizeof(int), cudaMemcpyHostToDevice);
 
-		knn<<<m, m, m*m*sizeof(int)>>>(m, n, k, d_V, d_out);
+		dim3 blk(m, m);
+		knn<<<1, blk, m*m*sizeof(int)>>>(m, n, k, d_V, d_out);
 
 		cudaMemcpy(out, d_out, m*k*sizeof(int), cudaMemcpyDeviceToHost);
 
