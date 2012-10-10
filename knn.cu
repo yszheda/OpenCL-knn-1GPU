@@ -15,19 +15,44 @@ void showResult(int m, int k, int *out);
 
 extern __shared__ int D[];
 
-__device__ void computeDist(int m, int n, int *V)
+__device__ void computeDimDist(int m, int n, int *V, int *dim_D)
 {
-	int i=threadIdx.x;
-   	int j=threadIdx.y;
-	int k;
+	int i = threadIdx.x;
+   	int j = threadIdx.y;
+	int k = threadIdx.z;
+	dim_D[(i*m+j)*n+k] = (V[i*n+k]-V[j*n+k])*(V[i*n+k]-V[j*n+k]);
+}
+
+__device__ void computeDist(int m, int n, int *V, int *dim_D)
+{
+	int i = threadIdx.x;
+   	int j = threadIdx.y;
+	int k = threadIdx.z;
+	int s = blockDim.y/2;
 	int dist = 0;
+	//dimention calculation
+	computeDimDist(m, n, V, dim_D);
+	__syncthreads();
 	//reduce duplications
+//	if(i < j)
+//	{
+//		for(k=0; k<n; k++)
+//		{
+//			dist += (V[i*n+k]-V[j*n+k])*(V[i*n+k]-V[j*n+k]);
+//		}
+//	}
+	//paralle reduction
 	if(i < j)
 	{
-		for(k=0; k<n; k++)
+		for(s=blockDim.y/2; s>0; s>>=1)
 		{
-			dist += (V[i*n+k]-V[j*n+k])*(V[i*n+k]-V[j*n+k]);
+			if(k < s)
+			{
+				dim_D[(i*m+j)*n+k] += dim_D[(i*m+j)*n+k+s];
+			}
 		}
+		__syncthreads();
+		dist += dim_D[(i*m+j)*n];
 	}
 	D[i*m+j] = dist;
 }
@@ -52,19 +77,17 @@ __device__ int prmin(int m, int *D, int *R)
 	return R[0];
 }
 
-__global__ void knn(int m, int n, int k, int *V, int *out)
+__global__ void knn(int m, int n, int k, int *V, int *out, int *dim_D)
 {
 	int i,j;
-	int dim;
 	int temp;
-	int sum;
 	int count;
 	int num;
 	int dist;
 	int is_duplicate;
 //	__shared__ int D[m*m];
 
-	computeDist(m, n, V);
+	computeDist(m, n, V, dim_D);
 	__syncthreads();
 	// let the first thread select the k-min dist
 	i = threadIdx.x;
@@ -138,6 +161,7 @@ int main(int argc, char *argv[])
 	int *d_V, *d_out;			//device copies
 	
 //	int *D;						//will be replaced with shared memory
+	int *dim_D;
 
 	FILE *fp;
 	if(argc != 2)
@@ -161,6 +185,7 @@ int main(int argc, char *argv[])
 		cudaMalloc((void **)&d_out, m*k*sizeof(int));
 
 //		cudaMalloc((void **)&D, m*m*sizeof(int));
+		cudaMalloc((void **)&dim_D, m*m*n*sizeof(int));
 
 		for(i=0; i<m*n; i++)
 		{
@@ -169,8 +194,8 @@ int main(int argc, char *argv[])
 		
 		cudaMemcpy(d_V, V, m*n*sizeof(int), cudaMemcpyHostToDevice);
 
-		dim3 blk(m, m);
-		knn<<<1, blk, m*m*sizeof(int)>>>(m, n, k, d_V, d_out);
+		dim3 blk(m, m, n);
+		knn<<<1, blk, m*m*sizeof(int)>>>(m, n, k, d_V, d_out, dim_D);
 
 		cudaMemcpy(out, d_out, m*k*sizeof(int), cudaMemcpyDeviceToHost);
 
@@ -178,6 +203,9 @@ int main(int argc, char *argv[])
 
 		cudaFree(d_V);
 		cudaFree(d_out);
+
+//		cudaFree(D);
+		cudaFree(dim_D);
 
 		free(V);
 		free(out);
