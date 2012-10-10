@@ -13,46 +13,46 @@
 #define INIT_MAX 100
 void showResult(int m, int k, int *out);
 
-extern __shared__ int D[];
+extern __shared__ int block_dim_D[];
 
-__device__ void computeDimDist(int m, int n, int *V, int *dim_D)
+__device__ void computeDimDist(int m, int n, int *V)
 {
-	int i = threadIdx.x;
-   	int j = threadIdx.y;
-	int k = threadIdx.z;
-	dim_D[(i*m+j)*n+k] = (V[i*n+k]-V[j*n+k])*(V[i*n+k]-V[j*n+k]);
+	int i = blockIdx.x;
+   	int j = threadIdx.x;
+	int k = threadIdx.y;
+	block_dim_D[j*n+k] = (V[i*n+k]-V[j*n+k])*(V[i*n+k]-V[j*n+k]);
 }
 
-__device__ void computeDist(int m, int n, int *V, int *dim_D)
+__device__ void computeDist(int m, int n, int *V, int *D)
 {
-	int i = threadIdx.x;
-   	int j = threadIdx.y;
-	int k = threadIdx.z;
-	int s = blockDim.y/2;
+	int i = blockIdx.x;
+   	int j = threadIdx.x;
+	int k = threadIdx.y;
+	int s;
+	int base_idx;
 	int dist = 0;
 	//dimention calculation
-	computeDimDist(m, n, V, dim_D);
+	computeDimDist(m, n, V);
 	__syncthreads();
 	//reduce duplications
-//	if(i < j)
-//	{
-//		for(k=0; k<n; k++)
-//		{
-//			dist += (V[i*n+k]-V[j*n+k])*(V[i*n+k]-V[j*n+k]);
-//		}
-//	}
-	//paralle reduction
+	base_idx = j*n;
 	if(i < j)
 	{
-		for(s=blockDim.y/2; s>0; s>>=1)
+		//paralle reduction
+		for(s=n/2; s>0; s>>=1)
 		{
 			if(k < s)
 			{
-				dim_D[(i*m+j)*n+k] += dim_D[(i*m+j)*n+k+s];
+				block_dim_D[base_idx+k] += block_dim_D[base_idx+k+s];
 			}
 		}
 		__syncthreads();
-		dist += dim_D[(i*m+j)*n];
+		dist = block_dim_D[base_idx];
+		//when n is odd, the last element of dim_D needs to be added
+		if(n > (n/2)*2)
+		{
+			dist += block_dim_D[base_idx+n-1];
+		}
 	}
 	D[i*m+j] = dist;
 }
@@ -77,7 +77,7 @@ __device__ int prmin(int m, int *D, int *R)
 	return R[0];
 }
 
-__global__ void knn(int m, int n, int k, int *V, int *out, int *dim_D)
+__global__ void knn(int m, int n, int k, int *V, int *out, int *D)
 {
 	int i,j;
 	int temp;
@@ -85,13 +85,12 @@ __global__ void knn(int m, int n, int k, int *V, int *out, int *dim_D)
 	int num;
 	int dist;
 	int is_duplicate;
-//	__shared__ int D[m*m];
 
-	computeDist(m, n, V, dim_D);
+	computeDist(m, n, V, D);
 	__syncthreads();
 	// let the first thread select the k-min dist
-	i = threadIdx.x;
-	if(threadIdx.y == 0)
+	i = blockIdx.x;
+	if(threadIdx.x == 0)
 	{
 		for(count=0; count<k; count++)
 		{
@@ -160,8 +159,8 @@ int main(int argc, char *argv[])
 	int *V, *out;				//host copies
 	int *d_V, *d_out;			//device copies
 	
-//	int *D;						//will be replaced with shared memory
-	int *dim_D;
+	int *D;						
+//	int *dim_D;					//be replaced with shared memory
 
 	FILE *fp;
 	if(argc != 2)
@@ -184,8 +183,8 @@ int main(int argc, char *argv[])
 		cudaMalloc((void **)&d_V, m*n*sizeof(int));
 		cudaMalloc((void **)&d_out, m*k*sizeof(int));
 
-//		cudaMalloc((void **)&D, m*m*sizeof(int));
-		cudaMalloc((void **)&dim_D, m*m*n*sizeof(int));
+		cudaMalloc((void **)&D, m*m*sizeof(int));
+//		cudaMalloc((void **)&dim_D, m*m*n*sizeof(int));
 
 		for(i=0; i<m*n; i++)
 		{
@@ -194,8 +193,9 @@ int main(int argc, char *argv[])
 		
 		cudaMemcpy(d_V, V, m*n*sizeof(int), cudaMemcpyHostToDevice);
 
-		dim3 blk(m, m, n);
-		knn<<<1, blk, m*m*sizeof(int)>>>(m, n, k, d_V, d_out, dim_D);
+//		dim3 blk(m, m, n);
+		dim3 blk(m, n);
+		knn<<<m, blk, m*n*sizeof(int)>>>(m, n, k, d_V, d_out, D);
 
 		cudaMemcpy(out, d_out, m*k*sizeof(int), cudaMemcpyDeviceToHost);
 
@@ -204,8 +204,8 @@ int main(int argc, char *argv[])
 		cudaFree(d_V);
 		cudaFree(d_out);
 
-//		cudaFree(D);
-		cudaFree(dim_D);
+		cudaFree(D);
+//		cudaFree(dim_D);
 
 		free(V);
 		free(out);
