@@ -1,8 +1,14 @@
 /* 
+* INPUT:
 * m: total num of points
+* m is in [10, 1000]
 * n: n dimensions
+* n is in [1,1000]
 * k: num of nearest points
+* k is in [1,10]
 * V: point coordinates
+* the integer elements are in [-5,5]
+* OUTPUT:
 * out: k nearest neighbors
 */
 
@@ -55,26 +61,6 @@ __device__ void computeDist(int m, int n, int *V, int *D)
 		}
 	}
 	D[i*m+j] = dist;
-}
-
-//paralle reduction?
-//cannot use D now!
-__device__ int prmin(int m, int *D, int *R)
-{
-	int j = threadIdx.y;
-	int s = blockDim.y/2;
-	R[j] = j;
-	__syncthreads();
-	for(s=blockDim.y; s>0; s>>=1)
-	{
-		if(j < s)
-		{
-			D[j] = D[j]<D[j+s]? D[j]: D[j+s]; 
-			R[j] = R[j]<R[j+s]? R[j]: R[j+s]; 
-		}
-		__syncthreads();
-	}
-	return R[0];
 }
 
 __global__ void knn(int m, int n, int k, int *V, int *out, int *D)
@@ -195,7 +181,19 @@ int main(int argc, char *argv[])
 
 //		dim3 blk(m, m, n);
 		dim3 blk(m, n);
+
+		cudaEvent_t start, stop;
+		cudaEventCreate(&start);
+		cudaEventCreate(&stop);
+		cudaEventRecord(start);
+
 		knn<<<m, blk, m*n*sizeof(int)>>>(m, n, k, d_V, d_out, D);
+
+		cudaEventRecord(stop);
+		cudaEventSynchronize(stop);
+		float time;
+		cudaEventElapsedTime(&time, start, stop);
+		printf("GPU calculation time:%f ms\n", time);
 
 		cudaMemcpy(out, d_out, m*k*sizeof(int), cudaMemcpyDeviceToHost);
 
