@@ -19,57 +19,73 @@
 #define INIT_MAX 100
 void showResult(int m, int k, int *out);
 
-extern __shared__ int block_dim_D[];
+extern __shared__ int SM[];
 
 // compute the square of distance per dimension
 // the kth dimension of the ith point and jth point
 __device__ void computeDimDist(int m, int n, int *V)
 {
 	int i = blockIdx.x;
-   	int j = threadIdx.x;
-	int k = threadIdx.y;
-	block_dim_D[j*n+k] = (V[i*n+k]-V[j*n+k])*(V[i*n+k]-V[j*n+k]);
+   	int j = blockIdx.y;
+	int k = threadIdx.x;
+	SM[k] = (V[i*n+k]-V[j*n+k])*(V[i*n+k]-V[j*n+k]);
 }
 
 // compute the square of distance of the ith point and jth point
-__device__ void computeDist(int m, int n, int *V, int *D)
+__global__ void computeDist(int m, int n, int *V, int *D)
 {
 	int i = blockIdx.x;
-   	int j = threadIdx.x;
-	int k = threadIdx.y;
+   	int j = blockIdx.y;
+	int k = threadIdx.x;
 	int s;
-	int base_idx;
 	int dist = 0;
 	// calculate the square of distance per dimensions
 	computeDimDist(m, n, V);
 	__syncthreads();
-	base_idx = j*n;
 	// reduce duplicated calculations since d(i, j) = d(j, i)
 	// also, we do not consider the trivial case of d(i, i) = 0
 	// so we only compute the square distance when i < j 
-	if(i < j)
+	if( i < j )
 	{
-		// use parallel reduction
+		// use paralel reduction
 		for(s=n/2; s>0; s>>=1)
 		{
 			if(k < s)
 			{
-				block_dim_D[base_idx+k] += block_dim_D[base_idx+k+s];
+				SM[k] += SM[k+s];
 			}
 		}
 		__syncthreads();
-		dist = block_dim_D[base_idx];
-		// when n is odd, the last element of block_dim_D needs to be added
+		dist = SM[0];
+		// when n is odd, the last element of SM needs to be added
 		if(n > (n/2)*2)
 		{
-			dist += block_dim_D[base_idx+n-1];
+			dist += SM[n-1];
 		}
 	}
 	D[i*m+j] = dist;
 }
 
+__device__ void initSM(int *D)
+{
+	int i = blockIdx.x;
+	int j;
+	for(j=0; j<m; j++)
+	{
+		if(i < j)
+		{
+			SM[j] = D[i*m+j];
+		}
+		else
+		{
+			SM[j] = D[j*m+i];	
+		}
+	}
+	__syncthreads();
+}
+
 // compute the k nearest neighbors
-__global__ void knn(int m, int n, int k, int *V, int *out, int *D)
+__global__ void knn(int m, int n, int k, int *V, int *D, int *out)
 {
 	int i,j;
 	int temp;
@@ -78,8 +94,6 @@ __global__ void knn(int m, int n, int k, int *V, int *out, int *D)
 	int dist;
 	int is_duplicate;
 
-	computeDist(m, n, V, D);
-	__syncthreads();
 	// find the k nearest neighbors of the point with index = blockIdx.x
 	i = blockIdx.x;
 	// let the first thread select the k-min distance
@@ -185,6 +199,7 @@ int main(int argc, char *argv[])
 		cudaMemcpy(d_V, V, m*n*sizeof(int), cudaMemcpyHostToDevice);
 
 		dim3 blk(m, n);
+		dim3 grid(m, m);
 		// compute the execution time
 		cudaEvent_t start, stop;
 		// create event
@@ -193,7 +208,9 @@ int main(int argc, char *argv[])
 		// record event
 		cudaEventRecord(start);
 		// launch knn() kernel on GPU
-		knn<<<m, blk, m*n*sizeof(int)>>>(m, n, k, d_V, d_out, D);
+		computeDist<<<grid, n, n*sizeof(int)>>>(m, n, d_V, D);
+		cudaDeviceSynchronize();
+		knn<<<m, m, m*sizeof(int)>>>(m, n, k, d_V, D, d_out);
 		// record event and synchronize
 		cudaEventRecord(stop);
 		cudaEventSynchronize(stop);
