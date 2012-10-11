@@ -16,7 +16,7 @@
 #include<cuda.h>
 #include<stdlib.h>
 
-#define INIT_MAX 100
+#define INIT_MAX 1000000
 void showResult(int m, int k, int *out);
 
 extern __shared__ int SM[];
@@ -38,14 +38,13 @@ __global__ void computeDist(int m, int n, int *V, int *D)
    	int j = blockIdx.y;
 	int k = threadIdx.x;
 	int s;
-	int dist = 0;
 	// calculate the square of distance per dimensions
 	computeDimDist(m, n, V);
 	__syncthreads();
 	// reduce duplicated calculations since d(i, j) = d(j, i)
 	// also, we do not consider the trivial case of d(i, i) = 0
 	// so we only compute the square distance when i < j 
-	if( i < j )
+	if(i < j)
 	{
 		// use paralel reduction
 		for(s=n/2; s>0; s>>=1)
@@ -54,92 +53,99 @@ __global__ void computeDist(int m, int n, int *V, int *D)
 			{
 				SM[k] += SM[k+s];
 			}
+			__syncthreads();
 		}
-		__syncthreads();
-		dist = SM[0];
+	}
+	if(k == 0)
+	{
 		// when n is odd, the last element of SM needs to be added
 		if(n > (n/2)*2)
 		{
-			dist += SM[n-1];
-		}
-	}
-	D[i*m+j] = dist;
-}
-
-__device__ void initSM(int *D)
-{
-	int i = blockIdx.x;
-	int j;
-	for(j=0; j<m; j++)
-	{
-		if(i < j)
-		{
-			SM[j] = D[i*m+j];
+			D[i*m+j] = SM[0] + SM[n-1];
 		}
 		else
 		{
-			SM[j] = D[j*m+i];	
+			D[i*m+j] = SM[0];
 		}
 	}
-	__syncthreads();
 }
 
-// compute the k nearest neighbors
-__global__ void knn(int m, int n, int k, int *V, int *D, int *out)
+__device__ void initSM(int m, int *D)
 {
-	int i,j;
-	int temp;
-	int count;
-	int num;
-	int dist;
-	int is_duplicate;
-
-	// find the k nearest neighbors of the point with index = blockIdx.x
-	i = blockIdx.x;
-	// let the first thread select the k-min distance
-	if(threadIdx.x == 0 && threadIdx.y == 0)
+	int i = blockIdx.x;
+	int j = threadIdx.x;
+	if(i < j)
 	{
-		for(count=0; count<k; count++)
+		SM[j] = D[i*m+j];
+	}
+	else
+	{
+		SM[j] = D[j*m+i];	
+	}
+}
+
+__device__ int findMin(int m, int n, int k, int count, int *D, int *out, int *R)
+{
+//	__shared__ int R[1000];
+	int i = blockIdx.x;
+  	int j = threadIdx.x;
+	int s = blockDim.x/2;
+	int num;
+	int baseIdx = i*m;
+	initSM(m, D);
+	__syncthreads();
+	R[baseIdx+j] = j;
+	__syncthreads();
+	SM[i] = INIT_MAX;
+	__syncthreads();
+	for(num=0; num<count; num++)
+	{
+		SM[ out[i*k+num] ] = INIT_MAX;
+	}
+	__syncthreads();
+	for(s=blockDim.x/2; s>0; s>>=1) 
+	{
+		// check whether the jth point is the same point as the ith one
+		// or has already in the k-nn list
+		if(j < s) 
 		{
-			temp = INIT_MAX;
-			// iterate the jth point
-			for(j=0; j<m; j++)
+			if(SM[j] > SM[j+s])
 			{
-				// check whether the jth point is the same point as the ith one
-				// or has already in the k-nn list
-				is_duplicate = 0;
-				if(j == i)
+				SM[j] = SM[j+s];
+				R[baseIdx+j] = R[baseIdx+j+s];
+			}
+			else if(SM[j] == SM[j+s])
+			{
+				if(R[baseIdx+j] > R[baseIdx+j+s])
 				{
-					is_duplicate = 1;
-				}
-				for(num=0; num<count; num++)
-				{
-					if(out[i*k+num] == j)
-					{
-						is_duplicate = 1;
-					}
-				}
-				// we have reduced duplicated calculation of the pair of d(i, j) and d(j, i) before,
-			    // and only one of them (here is the one that satisfies i<j) is valid
-				// now we need to load the correct one from the array D[]
-				if(!is_duplicate)
-				{
-					if(i < j)
-					{
-						dist = D[i*m+j];
-					}
-					else
-					{
-						dist = D[j*m+i];
-					}
-					if(dist < temp)
-					{
-						temp = dist;
-						out[i*k+count] = j;
-					}
+					R[baseIdx+j] = R[baseIdx+j+s];
 				}
 			}
 		}
+		__syncthreads();
+	}
+	// when m is odd, the last element of SM needs to be compared
+	if(m > (m/2)*2)
+	{
+		if(SM[0] > SM[m-1])
+		{
+			R[baseIdx] = R[baseIdx+m-1];
+		}
+	}
+	__syncthreads();
+	return R[baseIdx];
+}
+
+// compute the k nearest neighbors
+__global__ void knn(int m, int n, int k, int *V, int *D, int *out, int *R)
+{
+	int i;
+	int count;
+
+	i = blockIdx.x;
+	for(count=0; count<k; count++)
+	{
+		out[i*k+count] = findMin(m, n, k, count, D, out, R);
 	}
 }
 
@@ -169,6 +175,7 @@ int main(int argc, char *argv[])
 	int *V, *out;				//host copies
 	int *d_V, *d_out;			//device copies
 	int *D;						
+	int *R;						
 //	int *dim_D;					//be replaced with shared memory
 	FILE *fp;
 	if(argc != 2)
@@ -189,6 +196,7 @@ int main(int argc, char *argv[])
 		cudaMalloc((void **)&d_V, m*n*sizeof(int));
 		cudaMalloc((void **)&d_out, m*k*sizeof(int));
 		cudaMalloc((void **)&D, m*m*sizeof(int));
+		cudaMalloc((void **)&R, m*m*sizeof(int));
 //		cudaMalloc((void **)&dim_D, m*m*n*sizeof(int));
 
 		for(i=0; i<m*n; i++)
@@ -210,7 +218,7 @@ int main(int argc, char *argv[])
 		// launch knn() kernel on GPU
 		computeDist<<<grid, n, n*sizeof(int)>>>(m, n, d_V, D);
 		cudaDeviceSynchronize();
-		knn<<<m, m, m*sizeof(int)>>>(m, n, k, d_V, D, d_out);
+		knn<<<m, m, m*sizeof(int)>>>(m, n, k, d_V, D, d_out, R);
 		// record event and synchronize
 		cudaEventRecord(stop);
 		cudaEventSynchronize(stop);
@@ -226,6 +234,7 @@ int main(int argc, char *argv[])
 		cudaFree(d_V);
 		cudaFree(d_out);
 		cudaFree(D);
+		cudaFree(R);
 //		cudaFree(dim_D);
 
 		free(V);
