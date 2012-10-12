@@ -62,10 +62,12 @@ __global__ void computeDist(int m, int n, int *V, int *D)
 		if(n > (n/2)*2)
 		{
 			D[i*m+j] = SM[0] + SM[n-1];
+			D[j*m+i] = SM[0] + SM[n-1];
 		}
 		else
 		{
 			D[i*m+j] = SM[0];
+			D[j*m+i] = SM[0];
 		}
 	}
 }
@@ -84,17 +86,16 @@ __device__ void initSM(int m, int *D)
 	}
 }
 
-__device__ int findMin(int m, int n, int k, int count, int *D, int *out, int *R)
+__device__ int findMin(int m, int n, int k, int count, int *D, int *out)
 {
-//	__shared__ int R[1000];
+	__shared__ int R[1000];
 	int i = blockIdx.x;
   	int j = threadIdx.x;
 	int s = blockDim.x/2;
 	int num;
-	int baseIdx = i*m;
 	initSM(m, D);
 	__syncthreads();
-	R[baseIdx+j] = j;
+	R[j] = j;
 	__syncthreads();
 	SM[i] = INIT_MAX;
 	__syncthreads();
@@ -103,41 +104,41 @@ __device__ int findMin(int m, int n, int k, int count, int *D, int *out, int *R)
 		SM[ out[i*k+num] ] = INIT_MAX;
 	}
 	__syncthreads();
-	for(s=blockDim.x/2; s>0; s>>=1) 
+	for(s=m/2; s>0; s>>=1) 
 	{
 		// check whether the jth point is the same point as the ith one
 		// or has already in the k-nn list
 		if(j < s) 
 		{
-			if(SM[j] > SM[j+s])
+			if(SM[j] == SM[j+s])
 			{
-				SM[j] = SM[j+s];
-				R[baseIdx+j] = R[baseIdx+j+s];
-			}
-			else if(SM[j] == SM[j+s])
-			{
-				if(R[baseIdx+j] > R[baseIdx+j+s])
+				if(R[j] > R[j+s])
 				{
-					R[baseIdx+j] = R[baseIdx+j+s];
+					R[j] = R[j+s];
 				}
 			}
+			else if(SM[j] > SM[j+s])
+			{
+				SM[j] = SM[j+s];
+				R[j] = R[j+s];
+			}
+			__syncthreads();
 		}
-		__syncthreads();
 	}
 	// when m is odd, the last element of SM needs to be compared
 	if(m > (m/2)*2)
 	{
 		if(SM[0] > SM[m-1])
 		{
-			R[baseIdx] = R[baseIdx+m-1];
+			R[0] = R[m-1];
 		}
 	}
 	__syncthreads();
-	return R[baseIdx];
+	return R[0];
 }
 
 // compute the k nearest neighbors
-__global__ void knn(int m, int n, int k, int *V, int *D, int *out, int *R)
+__global__ void knn(int m, int n, int k, int *V, int *D, int *out)
 {
 	int i;
 	int count;
@@ -145,7 +146,8 @@ __global__ void knn(int m, int n, int k, int *V, int *D, int *out, int *R)
 	i = blockIdx.x;
 	for(count=0; count<k; count++)
 	{
-		out[i*k+count] = findMin(m, n, k, count, D, out, R);
+		out[i*k+count] = findMin(m, n, k, count, D, out);
+		__syncthreads();
 	}
 }
 
@@ -168,6 +170,26 @@ void showResult(int m, int k, int *out)
 		}
 	} 
 } 
+void showD(int m, int *D)
+{
+	int i,j;
+	printf("D:\n");
+	for(i=0; i<m; i++)
+	{
+		for(j=0; j<m; j++)
+		{
+			printf("%d", D[i*m+j]);
+			if(j == m-1)
+			{
+				printf("\n");
+			}
+			else
+			{
+				printf(" ");
+			}
+		}
+	} 
+} 
 int main(int argc, char *argv[]) 
 { 
 	int m,n,k;
@@ -175,7 +197,10 @@ int main(int argc, char *argv[])
 	int *V, *out;				//host copies
 	int *d_V, *d_out;			//device copies
 	int *D;						
-	int *R;						
+
+	//test
+	int *h_D;						
+//	int *R;						
 //	int *dim_D;					//be replaced with shared memory
 	FILE *fp;
 	if(argc != 2)
@@ -192,11 +217,13 @@ int main(int argc, char *argv[])
 	{
 		V = (int *) malloc(m*n*sizeof(int));
 		out = (int *) malloc(m*k*sizeof(int));
+
+		h_D = (int *)malloc(m*m*sizeof(int));
 		// allocate space for devices copies
 		cudaMalloc((void **)&d_V, m*n*sizeof(int));
 		cudaMalloc((void **)&d_out, m*k*sizeof(int));
 		cudaMalloc((void **)&D, m*m*sizeof(int));
-		cudaMalloc((void **)&R, m*m*sizeof(int));
+//		cudaMalloc((void **)&R, m*m*sizeof(int));
 //		cudaMalloc((void **)&dim_D, m*m*n*sizeof(int));
 
 		for(i=0; i<m*n; i++)
@@ -218,7 +245,10 @@ int main(int argc, char *argv[])
 		// launch knn() kernel on GPU
 		computeDist<<<grid, n, n*sizeof(int)>>>(m, n, d_V, D);
 		cudaDeviceSynchronize();
-		knn<<<m, m, m*sizeof(int)>>>(m, n, k, d_V, D, d_out, R);
+		//test
+		cudaMemcpy(h_D, D, m*m*sizeof(int), cudaMemcpyDeviceToHost);
+		showD(m, h_D);
+		knn<<<m, m, m*sizeof(int)>>>(m, n, k, d_V, D, d_out);
 		// record event and synchronize
 		cudaEventRecord(stop);
 		cudaEventSynchronize(stop);
@@ -234,7 +264,7 @@ int main(int argc, char *argv[])
 		cudaFree(d_V);
 		cudaFree(d_out);
 		cudaFree(D);
-		cudaFree(R);
+//		cudaFree(R);
 //		cudaFree(dim_D);
 
 		free(V);
