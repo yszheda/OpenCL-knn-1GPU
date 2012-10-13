@@ -110,6 +110,9 @@ __device__ int findMin(int m, int n, int k, int count, int *D, int *out)
 		// or has already in the k-nn list
 		if(j < s) 
 		{
+			SM[j] = SM[j]<SM[j+s]? SM[j]: SM[j+s];
+			R[j] = SM[j]<SM[j+s]? R[j]: R[j+s];
+			/*
 			if(SM[j] == SM[j+s])
 			{
 				if(R[j] > R[j+s])
@@ -122,6 +125,7 @@ __device__ int findMin(int m, int n, int k, int count, int *D, int *out)
 				SM[j] = SM[j+s];
 				R[j] = R[j+s];
 			}
+			*/
 			__syncthreads();
 		}
 	}
