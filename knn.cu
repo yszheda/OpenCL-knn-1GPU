@@ -44,7 +44,7 @@ __global__ void computeDist(int m, int n, int *V, int *D)
 	{
 		computeDimDist(i, j, n, V);
 		__syncthreads();
-		// use paralel reduction
+		// use parallel reduction
 		for(s=n/2; s>0; s>>=1)
 		{
 			if(k < s)
@@ -168,7 +168,7 @@ int main(int argc, char *argv[])
 	FILE *fp_out;
 	if(argc != 2)
 	{
-		printf("Usage: knn inputfile\n");
+		printf("Usage: knn <inputfile>\n");
 		exit(1);
 	}
 	if((fp_in = fopen(argv[1], "r")) == NULL)
@@ -220,6 +220,7 @@ int main(int argc, char *argv[])
 		cudaMemcpy(out, d_out, m*k*sizeof(int), cudaMemcpyDeviceToHost);
 
 		showResult(m, k, out);
+		printf("%f\n", time);
 		// cleanup
 		cudaFree(d_V);
 		cudaFree(d_out);
