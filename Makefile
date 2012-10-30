@@ -1,3 +1,8 @@
-CC = nvcc
+NVCC = nvcc
+CC = gcc
 knn:
-	$(CC) -o knn.o knn.cu
+	$(NVCC) -o knn.o knn.cu
+clean:
+	rm knn.o
+test:
+	$(CC) -o test_gen test_gen.c

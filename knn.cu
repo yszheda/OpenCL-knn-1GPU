@@ -19,7 +19,7 @@
 #define INIT_MAX 1000000
 void showResult(int m, int k, int *out);
 
-extern __shared__ int SM[];
+extern __shared__ int SMem[];
 
 // compute the square of distance per dimension
 // the kth dimension of the ith point and jth point
@@ -28,7 +28,7 @@ __device__ void computeDimDist(int m, int n, int *V)
 	int i = blockIdx.x;
    	int j = blockIdx.y;
 	int k = threadIdx.x;
-	SM[k] = (V[i*n+k]-V[j*n+k])*(V[i*n+k]-V[j*n+k]);
+	SMem[k] = (V[i*n+k]-V[j*n+k])*(V[i*n+k]-V[j*n+k]);
 }
 
 // compute the square of distance of the ith point and jth point
@@ -38,6 +38,7 @@ __global__ void computeDist(int m, int n, int *V, int *D)
    	int j = blockIdx.y;
 	int k = threadIdx.x;
 	int s;
+	int currentScale;
 	// calculate the square of distance per dimensions
 	computeDimDist(m, n, V);
 	__syncthreads();
@@ -47,42 +48,51 @@ __global__ void computeDist(int m, int n, int *V, int *D)
 	if(i < j)
 	{
 		// use paralel reduction
-		for(s=n/2; s>0; s>>=1)
+//		for(s=blockDim.x/2, currentScale=blockDim.x; s>0; s>>=1, currentScale>>=1)
+		for(s=blockDim.x/2, currentScale=blockDim.x; s>0; s>>=1)
 		{
 			if(k < s)
 			{
-				SM[k] += SM[k+s];
+				SMem[k] += SMem[k+s];
 			}
+			__syncthreads();
+			// when s is odd, the last element of SMem needs to be added
+			if( currentScale>s*2 )
+			{
+				SMem[0] += SMem[currentScale-1];
+			}
+			currentScale>>=1;
 			__syncthreads();
 		}
 	}
+	/*
 	if(k == 0)
 	{
-		// when n is odd, the last element of SM needs to be added
+		// when n is odd, the last element of SMem needs to be added
 		if(n > (n/2)*2)
 		{
-			D[i*m+j] = SM[0] + SM[n-1];
-			D[j*m+i] = SM[0] + SM[n-1];
+			D[i*m+j] = SMem[0] + SMem[n-1];
 		}
 		else
 		{
-			D[i*m+j] = SM[0];
-			D[j*m+i] = SM[0];
+			D[i*m+j] = SMem[0];
 		}
 	}
+	*/	
+	D[i*m+j] = SMem[0];
 }
 
-__device__ void initSM(int m, int *D)
+__device__ void initSMem(int m, int *D)
 {
 	int i = blockIdx.x;
 	int j = threadIdx.x;
 	if(i < j)
 	{
-		SM[j] = D[i*m+j];
+		SMem[j] = D[i*m+j];
 	}
 	else
 	{
-		SM[j] = D[j*m+i];	
+		SMem[j] = D[j*m+i];	
 	}
 }
 
@@ -92,52 +102,122 @@ __device__ int findMin(int m, int n, int k, int count, int *D, int *out)
 	int i = blockIdx.x;
   	int j = threadIdx.x;
 	int s = blockDim.x/2;
+	int currentScale;
+//	int last_s = s;
 	int num;
-	initSM(m, D);
+	initSMem(m, D);
 	__syncthreads();
 	R[j] = j;
 	__syncthreads();
-	SM[i] = INIT_MAX;
-	__syncthreads();
+	if(j == i)
+	{
+			SMem[i] = INIT_MAX;
+//	__syncthreads();
+		for(num=0; num<count; num++)
+		{
+			SMem[ out[i*k+num] ] = INIT_MAX;
+		}
+//	__syncthreads();
+	}
+	/*
 	for(num=0; num<count; num++)
 	{
-		SM[ out[i*k+num] ] = INIT_MAX;
+		SMem[ out[i*k+num] ] = INIT_MAX;
 	}
 	__syncthreads();
-	for(s=m/2; s>0; s>>=1) 
+	if(j < count)
 	{
-		// check whether the jth point is the same point as the ith one
-		// or has already in the k-nn list
+		SMem[ out[i*k+j] ] = INIT_MAX;
+	}
+	*/
+
+	__syncthreads();
+//	for(s=blockDim.x/2; s>0; s>>=1, last_s=s) 
+	for(s=blockDim.x/2, currentScale=blockDim.x; s>0; s>>=1, currentScale>>=1) 
+	{
 		if(j < s) 
 		{
-			SM[j] = SM[j]<SM[j+s]? SM[j]: SM[j+s];
-			R[j] = SM[j]<SM[j+s]? R[j]: R[j+s];
-			/*
-			if(SM[j] == SM[j+s])
+			if(SMem[j] == SMem[j+s])
 			{
 				if(R[j] > R[j+s])
 				{
 					R[j] = R[j+s];
 				}
 			}
-			else if(SM[j] > SM[j+s])
+			else if(SMem[j] > SMem[j+s])
 			{
-				SM[j] = SM[j+s];
+				SMem[j] = SMem[j+s];
 				R[j] = R[j+s];
 			}
-			*/
-			__syncthreads();
 		}
+		__syncthreads();
+		if( currentScale>s*2 )
+		{
+			if(SMem[0] == SMem[currentScale-1])
+			{
+				if(R[0] > R[currentScale-1])
+				{
+					R[0] = R[currentScale-1];
+				}
+			}
+			else if(SMem[0] > SMem[currentScale-1])
+			{
+				SMem[0] = SMem[currentScale-1];
+				R[0] = R[currentScale-1];
+			}
+		}
+		__syncthreads();
 	}
-	// when m is odd, the last element of SM needs to be compared
+		/*
+		if( (s/2)>0 && s>(s/2)*2 )
+		{
+			if(SMem[0] == SMem[s-1])
+			{
+				if(R[0] > R[s-1])
+				{
+					R[0] = R[s-1];
+				}
+			}
+			else if(SMem[0] > SMem[s-1])
+			{
+				SMem[0] = SMem[s-1];
+				R[0] = R[s-1];
+			}
+		}
+		__syncthreads();
+	}
+	*/
+		/*
+		if(last_s > s*2)
+		{
+			if(SMem[0] == SMem[last_s-1])
+			{
+				if(R[0] > R[last_s-1])
+				{
+					R[0] = R[last_s-1];
+				}
+			}
+			else if(SMem[0] > SMem[last_s-1])
+			{
+				SMem[0] = SMem[last_s-1];
+				R[0] = R[last_s-1];
+			}
+		}
+		__syncthreads();
+		last_s=s;
+	}
+	*/
+	// when m is odd, the last element of SMem needs to be compared
+	/*
 	if(m > (m/2)*2)
 	{
-		if(SM[0] > SM[m-1])
+		if(SMem[0] > SMem[m-1])
 		{
 			R[0] = R[m-1];
 		}
 	}
 	__syncthreads();
+	*/
 	return R[0];
 }
 
@@ -148,6 +228,7 @@ __global__ void knn(int m, int n, int k, int *V, int *D, int *out)
 	int count;
 
 	i = blockIdx.x;
+	__syncthreads();
 	for(count=0; count<k; count++)
 	{
 		out[i*k+count] = findMin(m, n, k, count, D, out);
