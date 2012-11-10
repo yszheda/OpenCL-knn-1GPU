@@ -29,8 +29,6 @@ extern __shared__ int SMem[];
 // compute the square of distance of the ith point and jth point
 __global__ void computeDist(int m, int n, int *V, int *D)
 {
-//	__shared__ int rowVector[TILE_DEPTH][TILE_WIDTH];
-//	__shared__ int colVector[TILE_DEPTH][TILE_WIDTH];
 	__shared__ int rowVector[TILE_WIDTH][TILE_DEPTH];
 	__shared__ int colVector[TILE_DEPTH][TILE_WIDTH];
 	__shared__ int dist[TILE_WIDTH][TILE_WIDTH];
@@ -39,57 +37,44 @@ __global__ void computeDist(int m, int n, int *V, int *D)
    	int by = blockIdx.y;
 	int tx = threadIdx.x;
 	int ty = threadIdx.y;
-	int row = by*TILE_WIDTH+ty;
-	int col = bx*TILE_WIDTH+tx;
-	int dim;
+	int row;
+	int col;
+//	int row = by*TILE_WIDTH+ty;
+//	int col = bx*TILE_WIDTH+tx;
+	int px;
+	int py;	
 
-	dist[ty][tx] = 0;
+	for(py=ty; py<TILE_WIDTH; py+=blockDim.y)
+	{
+	for(px=tx; px<TILE_WIDTH; px+=blockDim.x)
+	{
+	
+	row = by*TILE_WIDTH+py;
+	col = bx*TILE_WIDTH+px;
+	dist[py][px] = 0;
 	__syncthreads();
 
-//	for(int i=0; i<n/TILE_WIDTH; i++)
 	for(int i=0; i<(int)(ceil((float)n/TILE_DEPTH)); i++)
 	{
 		for(int j=0; j<TILE_DEPTH; j++)
 		{
-//			rowVector[ty][j] = V[row*m+i*TILE_DEPTH+j];
-			rowVector[ty][j] = V[row*n+i*TILE_DEPTH+j];
+			rowVector[py][j] = V[row*n+i*TILE_DEPTH+j];
 		}
 		for(int j=0; j<TILE_DEPTH; j++)
 		{		
-//			colVector[j][tx] = V[(i*TILE_DEPTH+j)*m+col];
-			colVector[j][tx] = V[col*n+i*TILE_DEPTH+j];
+			colVector[j][px] = V[col*n+i*TILE_DEPTH+j];
 		}
-//		rowVector[ty][tx] = V[row*m+i*TILE_DEPTH+tx];
-//		colVector[ty][tx] = V[(i*TILE_DEPTH+ty)*m+col];
-/*
-		for(int j=0; j<TILE_DEPTH/blockDim.x; j++)
-		{
-			dim = j*blockDim.x+tx;
-			rowVector[ty][dim] = V[row*m+i*TILE_DEPTH+dim];
-		}
-		for(int j=0; j<TILE_DEPTH/blockDim.y; j++)
-		{
-			dim = j*blockDim.y+ty;
-			colVector[dim][tx] = V[(i*TILE_DEPTH+dim)*m+col];
-		}
-*/
 		__syncthreads();
 
 		for(int j=0; j<TILE_DEPTH; j++)
 		{
-			dist[ty][tx] += (rowVector[ty][j]-colVector[j][tx])*(rowVector[ty][j]-colVector[j][tx]);
+			dist[py][px] += (rowVector[py][j]-colVector[j][px])*(rowVector[py][j]-colVector[j][px]);
 		}
 		__syncthreads();
 	}
-
-//	for(int i=0; i<TILE_WIDTH; i++)
-//	{
-//		for(int j=0; j<TILE_WIDTH; j++)
-//		{
-			D[row*m+col] = dist[ty][tx];
-//		}
-//	}
-
+	D[row*m+col] = dist[py][px];
+	}
+	}
 }
 
 __device__ void initSMem(int m, int k, int count, int *D, int *out)
@@ -120,7 +105,7 @@ __device__ int findMin(int m, int k, int count, int *D, int *out)
 	int s = blockDim.x/2;
 //	int currentScale;
 //	int last_s = s;
-	int num;
+//	int num;
 
 	int indexBase = m;
 
@@ -306,16 +291,15 @@ int *h_D;
 
 		dim3 grid(gridDimX, gridDimY);
 //		dim3 grid(m, m);
-		dim3 block(TILE_WIDTH, TILE_WIDTH);
+		dim3 block(TILE_WIDTH/2, TILE_WIDTH/2);
+//		dim3 block(TILE_WIDTH, TILE_WIDTH);
 		// launch knn() kernel on GPU
 		computeDist<<<grid, block>>>(m, n, d_V, D);
 //		computeDist<<<grid, n, n*sizeof(int)>>>(m, n, d_V, D);
 		cudaDeviceSynchronize();
 
-
-		cudaMemcpy(h_D, D, m*m*sizeof(int), cudaMemcpyDeviceToHost);
+cudaMemcpy(h_D, D, m*m*sizeof(int), cudaMemcpyDeviceToHost);
 //		showD(m, h_D);
-
 
 		knn<<<m, m, 2*m*sizeof(int)>>>(m, k, d_V, D, d_out);
 
