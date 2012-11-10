@@ -17,14 +17,12 @@
 #include<stdlib.h>
 
 #define INIT_MAX 10000000
-
 #define TILE_WIDTH 32
-//#define TILE_DEPTH 32
 #define TILE_DEPTH 128
+#define MAX_BLOCK_SIZE 256
 
 void showResult(int m, int k, int *out);
 
-extern __shared__ int SMem[];
 
 // compute the square of distance of the ith point and jth point
 __global__ void computeDist(int m, int n, int *V, int *D)
@@ -46,36 +44,38 @@ __global__ void computeDist(int m, int n, int *V, int *D)
 
 	for(py=ty; py<TILE_WIDTH; py+=blockDim.y)
 	{
-	for(px=tx; px<TILE_WIDTH; px+=blockDim.x)
-	{
-	
-	row = by*TILE_WIDTH+py;
-	col = bx*TILE_WIDTH+px;
-	dist[py][px] = 0;
-	__syncthreads();
-
-	for(int i=0; i<(int)(ceil((float)n/TILE_DEPTH)); i++)
-	{
-		for(int j=0; j<TILE_DEPTH; j++)
+		for(px=tx; px<TILE_WIDTH; px+=blockDim.x)
 		{
-			rowVector[py][j] = V[row*n+i*TILE_DEPTH+j];
+		
+			row = by*TILE_WIDTH+py;
+			col = bx*TILE_WIDTH+px;
+			dist[py][px] = 0;
+			__syncthreads();
+		
+			for(int i=0; i<(int)(ceil((float)n/TILE_DEPTH)); i++)
+			{
+				for(int j=0; j<TILE_DEPTH; j++)
+				{
+					rowVector[py][j] = V[row*n+i*TILE_DEPTH+j];
+				}
+				for(int j=0; j<TILE_DEPTH; j++)
+				{		
+					colVector[j][px] = V[col*n+i*TILE_DEPTH+j];
+				}
+				__syncthreads();
+		
+				for(int j=0; j<TILE_DEPTH; j++)
+				{
+					dist[py][px] += (rowVector[py][j]-colVector[j][px])*(rowVector[py][j]-colVector[j][px]);
+				}
+				__syncthreads();
+			}
+			D[row*m+col] = dist[py][px];
 		}
-		for(int j=0; j<TILE_DEPTH; j++)
-		{		
-			colVector[j][px] = V[col*n+i*TILE_DEPTH+j];
-		}
-		__syncthreads();
-
-		for(int j=0; j<TILE_DEPTH; j++)
-		{
-			dist[py][px] += (rowVector[py][j]-colVector[j][px])*(rowVector[py][j]-colVector[j][px]);
-		}
-		__syncthreads();
-	}
-	D[row*m+col] = dist[py][px];
-	}
 	}
 }
+
+extern __shared__ int SMem[];
 
 __device__ void initSMem(int m, int k, int count, int *D, int *out)
 {
@@ -99,94 +99,85 @@ __device__ void initSMem(int m, int k, int count, int *D, int *out)
 
 __device__ int findMin(int m, int k, int count, int *D, int *out)
 {
-//	__shared__ int R[1024];
 	int i = blockIdx.x;
-  	int j = threadIdx.x;
+  	int tid = threadIdx.x;
+//  	int j = threadIdx.x;
 	int s = blockDim.x/2;
-//	int currentScale;
-//	int last_s = s;
-//	int num;
 
 	int indexBase = m;
 
-	initSMem(m, k, count, D, out);
-	__syncthreads();
+//	initSMem(m, k, count, D, out);
 
-//	initSMem(m, D);
-//	__syncthreads();
-//	R[j] = j;
-//	__syncthreads();
-//	if(j == i)
-//	{
-//		SMem[i] = INIT_MAX;
-//		/*
-//		for(num=0; num<count; num++)
-//		{
-//			SMem[ out[i*k+num] ] = INIT_MAX;
-//		}
-//		*/
-//	}
-	/*
-	for(num=0; num<count; num++)
+//	j = tid;
+//	while(j < m)
+	for(int j=tid; j<m; j+=blockDim.x)
 	{
-		SMem[ out[i*k+num] ] = INIT_MAX;
+		if(j == i)
+		{
+			SMem[i] = INIT_MAX;
+		}
+		else
+		{
+			SMem[j] = D[i*m+j];
+		}
+		//index
+		SMem[indexBase+j] = j;
+		__syncthreads();
+/*
+		if(j < count)
+		{
+			SMem[ out[i*k+j] ] = INIT_MAX;
+		}
+		__syncthreads();
+*/
+//		j+=blockDim.x;
 	}
-	__syncthreads();
-	*/
-	if(j < count)
+/*
+	for(j=tid; j<m; j+=blockDim.x)
+	{
+		if(j < count)
+		{
+			SMem[ out[i*k+j] ] = INIT_MAX;
+		}
+		__syncthreads();
+	}
+*/
+	for(int j=0; j<count; j++)
 	{
 		SMem[ out[i*k+j] ] = INIT_MAX;
 	}
 	__syncthreads();
-
-//	currentScale=blockDim.x;
-	for(s=blockDim.x/2; s>0; s>>=1) 
+/*
+	if(tid < count)
 	{
-		if(j < s) 
+		SMem[ out[i*k+tid] ] = INIT_MAX;
+	}
+	__syncthreads();
+*/
+//	for(s=blockDim.x/2; s>0; s>>=1) 
+	for(s=m/2; s>0; s>>=1) 
+	{
+		for(int j=tid; j<m; j+=blockDim.x)
 		{
-			if(SMem[j] == SMem[j+s])
+			if(j < s) 
 			{
-				if(SMem[indexBase+j] > SMem[indexBase+j+s])
+				if(SMem[j] == SMem[j+s])
 				{
+					if(SMem[indexBase+j] > SMem[indexBase+j+s])
+					{
+						SMem[indexBase+j] = SMem[indexBase+j+s];
+					}
+				}
+				else if(SMem[j] > SMem[j+s])
+				{
+					SMem[j] = SMem[j+s];
 					SMem[indexBase+j] = SMem[indexBase+j+s];
 				}
-				/*
-				if(R[j] > R[j+s])
-				{
-					R[j] = R[j+s];
-				}
-				*/
 			}
-			else if(SMem[j] > SMem[j+s])
-			{
-				SMem[j] = SMem[j+s];
-				SMem[indexBase+j] = SMem[indexBase+j+s];
-//				R[j] = R[j+s];
-			}
+			__syncthreads();
 		}
-		__syncthreads();
-		/*
-		if( currentScale>s*2 )
-		{
-			if(SMem[0] == SMem[currentScale-1])
-			{
-				if(R[0] > R[currentScale-1])
-				{
-					R[0] = R[currentScale-1];
-				}
-			}
-			else if(SMem[0] > SMem[currentScale-1])
-			{
-				SMem[0] = SMem[currentScale-1];
-				R[0] = R[currentScale-1];
-			}
-		}
-		currentScale>>=1;
-		__syncthreads();
-		*/
 	}
 	return SMem[indexBase];
-//	return R[0];
 }
 
 // compute the k nearest neighbors
@@ -301,7 +292,9 @@ int *h_D;
 cudaMemcpy(h_D, D, m*m*sizeof(int), cudaMemcpyDeviceToHost);
 //		showD(m, h_D);
 
-		knn<<<m, m, 2*m*sizeof(int)>>>(m, k, d_V, D, d_out);
+		int threadNum = (m<MAX_BLOCK_SIZE)? m: MAX_BLOCK_SIZE;
+//		knn<<<m, m, 2*m*sizeof(int)>>>(m, k, d_V, D, d_out);
+		knn<<<m, threadNum, 2*m*sizeof(int)>>>(m, k, d_V, D, d_out);
 
 		// copy result back to host
 		cudaMemcpy(out, d_out, m*k*sizeof(int), cudaMemcpyDeviceToHost);
