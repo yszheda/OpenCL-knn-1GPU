@@ -1,13 +1,9 @@
 /* 
 * INPUT:
 * m: total num of points
-* m is in [10, 1000]
 * n: n dimensions
-* n is in [1,1000]
 * k: num of nearest points
-* k is in [1,10]
 * V: point coordinates
-* the integer elements are in [-5,5]
 * OUTPUT:
 * out: k nearest neighbors
 */
@@ -20,6 +16,7 @@
 #define TILE_WIDTH 32
 #define TILE_DEPTH 128
 #define MAX_BLOCK_SIZE 256
+#define MAX_PTRNUM_IN_SMEM 4096
 
 void showResult(int m, int k, int *out);
 
@@ -101,83 +98,98 @@ __device__ int findMin(int m, int k, int count, int *D, int *out)
 {
 	int i = blockIdx.x;
   	int tid = threadIdx.x;
-//  	int j = threadIdx.x;
+
 	int s = blockDim.x/2;
-
-	int indexBase = m;
-
-//	initSMem(m, k, count, D, out);
-
-//	j = tid;
-//	while(j < m)
-	for(int j=tid; j<m; j+=blockDim.x)
+	int resultValue = INIT_MAX;
+	int resultIndex = INIT_MAX;
+	int indexBase = (m<MAX_PTRNUM_IN_SMEM)? m: MAX_PTRNUM_IN_SMEM;
+	
+	for(int num=0; num<m; num+=MAX_PTRNUM_IN_SMEM)
 	{
-		if(j == i)
+		for(int j=tid; j<indexBase; j+=blockDim.x)
 		{
-			SMem[i] = INIT_MAX;
-		}
-		else
-		{
-			SMem[j] = D[i*m+j];
-		}
-		//index
-		SMem[indexBase+j] = j;
-		__syncthreads();
-/*
-		if(j < count)
-		{
-			SMem[ out[i*k+j] ] = INIT_MAX;
-		}
-		__syncthreads();
-*/
-//		j+=blockDim.x;
-	}
-/*
-	for(j=tid; j<m; j+=blockDim.x)
-	{
-		if(j < count)
-		{
-			SMem[ out[i*k+j] ] = INIT_MAX;
-		}
-		__syncthreads();
-	}
-*/
-	for(int j=0; j<count; j++)
-	{
-		SMem[ out[i*k+j] ] = INIT_MAX;
-	}
-	__syncthreads();
-/*
-	if(tid < count)
-	{
-		SMem[ out[i*k+tid] ] = INIT_MAX;
-	}
-	__syncthreads();
-*/
-//	for(s=blockDim.x/2; s>0; s>>=1) 
-	for(s=m/2; s>0; s>>=1) 
-	{
-		for(int j=tid; j<m; j+=blockDim.x)
-		{
-			if(j < s) 
+			if(j+num == i)
 			{
-				if(SMem[j] == SMem[j+s])
+				SMem[j] = INIT_MAX;
+			}
+			else
+			{
+				SMem[j] = D[i*m+num+j];
+			}
+			//index
+			SMem[indexBase+j] = j+num;
+			__syncthreads();
+/*
+			if(tid < count)
+			{
+				if(out[i*k+tid]-num>0 && out[i*k+tid]-num < indexBase)
 				{
-					if(SMem[indexBase+j] > SMem[indexBase+j+s])
-					{
-						SMem[indexBase+j] = SMem[indexBase+j+s];
-					}
-				}
-				else if(SMem[j] > SMem[j+s])
-				{
-					SMem[j] = SMem[j+s];
-					SMem[indexBase+j] = SMem[indexBase+j+s];
+					SMem[ out[i*k+tid]-num ] = INIT_MAX;
 				}
 			}
 			__syncthreads();
+*/
 		}
+//		__syncthreads();
+		for(int j=0; j<count; j++)
+		{
+			if(out[i*k+j]-num>=0 && out[i*k+j]-num<indexBase)
+			{
+				SMem[ out[i*k+j]-num ] = INIT_MAX;
+			}
+			__syncthreads();
+		}
+		__syncthreads();
+/*
+		if(tid < count)
+		{
+			if(out[i*k+tid]-num>0 && out[i*k+tid]-num < indexBase)
+			{
+				SMem[ out[i*k+tid]-num ] = INIT_MAX;
+			}
+//			SMem[ out[i*k+tid] ] = INIT_MAX;
+		}
+		__syncthreads();
+*/
+		for(s=indexBase/2; s>0; s>>=1) 
+		{
+			for(int j=tid; j<indexBase; j+=blockDim.x)
+			{
+				if(j < s) 
+				{
+					if(SMem[j] == SMem[j+s])
+					{
+						if(SMem[indexBase+j] > SMem[indexBase+j+s])
+						{
+							SMem[indexBase+j] = SMem[indexBase+j+s];
+						}
+					}
+					else if(SMem[j] > SMem[j+s])
+					{
+						SMem[j] = SMem[j+s];
+						SMem[indexBase+j] = SMem[indexBase+j+s];
+					}
+				}
+				__syncthreads();
+			}
+		}
+	
+		if(resultValue == SMem[0])
+		{
+			if(resultIndex > SMem[indexBase])
+			{
+				resultIndex = SMem[indexBase];
+			}
+		} 
+		else if (resultValue > SMem[0])
+		{
+			resultValue = SMem[0];
+			resultIndex = SMem[indexBase];
+		}
+		__syncthreads();
 	}
-	return SMem[indexBase];
+	return resultIndex;
+
 }
 
 // compute the k nearest neighbors
@@ -198,7 +210,7 @@ __global__ void knn(int m, int k, int *V, int *D, int *out)
 void showD(int m, int *D)
 {
 	int i,j;
-printf("D:\n");
+	printf("D:\n");
 	for(i=0; i<m; i++)
 	{
 		for(j=0; j<m; j++)
@@ -210,7 +222,7 @@ printf("D:\n");
 			}	
 		}    	
 	}        	
-printf("D:\n");
+	printf("D:\n");
 }            	
 
 void showResult(int m, int k, int *out)
@@ -236,7 +248,7 @@ int main(int argc, char *argv[])
 	int *d_V, *d_out;			//device copies
 	int *D;						
 
-int *h_D;
+//int *h_D;
 
 	FILE *fp;
 	if(argc != 2)
@@ -254,16 +266,16 @@ int *h_D;
 		V = (int *) malloc(m*n*sizeof(int));
 		out = (int *) malloc(m*k*sizeof(int));
 
-		h_D = (int *) malloc(m*m*sizeof(int));
-//		cudaDeviceSetCacheConfig(cudaFuncCachePreferShared);	
+//h_D = (int *) malloc(m*m*sizeof(int));
+//cudaDeviceSetCacheConfig(cudaFuncCachePreferShared);	
 
 		// compute the execution time
 		cudaEvent_t start, stop;
-		// create event
-		cudaEventCreate(&start);
-		cudaEventCreate(&stop);
-		// record event
-		cudaEventRecord(start);
+//		// create event
+//		cudaEventCreate(&start);
+//		cudaEventCreate(&stop);
+//		// record event
+//		cudaEventRecord(start);
 
 		// allocate space for devices copies
 		cudaMalloc((void **)&d_V, m*n*sizeof(int));
@@ -284,20 +296,27 @@ int *h_D;
 //		dim3 grid(m, m);
 		dim3 block(TILE_WIDTH/2, TILE_WIDTH/2);
 //		dim3 block(TILE_WIDTH, TILE_WIDTH);
+
+		// create event
+		cudaEventCreate(&start);
+		cudaEventCreate(&stop);
+		// record event
+		cudaEventRecord(start);
+
 		// launch knn() kernel on GPU
 		computeDist<<<grid, block>>>(m, n, d_V, D);
 //		computeDist<<<grid, n, n*sizeof(int)>>>(m, n, d_V, D);
 		cudaDeviceSynchronize();
 
-cudaMemcpy(h_D, D, m*m*sizeof(int), cudaMemcpyDeviceToHost);
-//		showD(m, h_D);
+//cudaMemcpy(h_D, D, m*m*sizeof(int), cudaMemcpyDeviceToHost);
+//showD(m, h_D);
 
 		int threadNum = (m<MAX_BLOCK_SIZE)? m: MAX_BLOCK_SIZE;
 //		knn<<<m, m, 2*m*sizeof(int)>>>(m, k, d_V, D, d_out);
-		knn<<<m, threadNum, 2*m*sizeof(int)>>>(m, k, d_V, D, d_out);
 
-		// copy result back to host
-		cudaMemcpy(out, d_out, m*k*sizeof(int), cudaMemcpyDeviceToHost);
+		int ptrNumInSMEM = (m<MAX_PTRNUM_IN_SMEM)? m: MAX_PTRNUM_IN_SMEM;
+		knn<<<m, threadNum, 2*ptrNumInSMEM*sizeof(int)>>>(m, k, d_V, D, d_out);
+//		knn<<<m, threadNum, 2*m*sizeof(int)>>>(m, k, d_V, D, d_out);
 
 		// record event and synchronize
 		cudaEventRecord(stop);
@@ -305,6 +324,16 @@ cudaMemcpy(h_D, D, m*m*sizeof(int), cudaMemcpyDeviceToHost);
 		float time;
 		// get event elapsed time
 		cudaEventElapsedTime(&time, start, stop);
+
+		// copy result back to host
+		cudaMemcpy(out, d_out, m*k*sizeof(int), cudaMemcpyDeviceToHost);
+
+//		// record event and synchronize
+//		cudaEventRecord(stop);
+//		cudaEventSynchronize(stop);
+//		float time;
+//		// get event elapsed time
+//		cudaEventElapsedTime(&time, start, stop);
 
 		showResult(m, k, out);
 		if(m == 1024) {
@@ -322,7 +351,7 @@ cudaMemcpy(h_D, D, m*m*sizeof(int), cudaMemcpyDeviceToHost);
 		cudaFree(D);
 		free(V);
 		free(out);
-free(h_D);
+//free(h_D);
 	}
 	fclose(fp);
 	return 0;
