@@ -131,7 +131,10 @@ __device__ int findMin(int m, int k, int count, int *D, int *out)
 */
 		}
 //		__syncthreads();
-		for(int j=0; j<count; j++)
+
+//		for(int j=0; j<count; j++)
+		//coalesce
+		for(int j=tid; j<count; j+=blockDim.x)
 		{
 			if(out[i*k+j]-num>=0 && out[i*k+j]-num<indexBase)
 			{
