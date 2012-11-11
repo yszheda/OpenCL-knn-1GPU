@@ -51,11 +51,11 @@ __global__ void computeDist(int m, int n, int *V, int *D)
 		
 			for(int i=0; i<(int)(ceil((float)n/TILE_DEPTH)); i++)
 			{
-				for(int j=0; j<TILE_DEPTH; j++)
+				for(int j=tx; j<TILE_DEPTH; j+=blockDim.x)
 				{
 					rowVector[py][j] = V[row*n+i*TILE_DEPTH+j];
 				}
-				for(int j=0; j<TILE_DEPTH; j++)
+				for(int j=ty; j<TILE_DEPTH; j+=blockIdx.y)
 				{		
 					colVector[j][px] = V[col*n+i*TILE_DEPTH+j];
 				}
