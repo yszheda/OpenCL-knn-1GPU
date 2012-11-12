@@ -55,7 +55,7 @@ __global__ void computeDist(int m, int n, int *V, int *D)
 				{
 					rowVector[py][j] = V[row*n+i*TILE_DEPTH+j];
 				}
-				for(int j=ty; j<TILE_DEPTH; j+=blockIdx.y)
+				for(int j=ty; j<TILE_DEPTH; j+=blockDim.y)
 				{		
 					colVector[j][px] = V[col*n+i*TILE_DEPTH+j];
 				}
@@ -131,7 +131,7 @@ __device__ int findMin(int m, int k, int count, int *D, int *out)
 */
 		}
 //		__syncthreads();
-
+/*
 //		for(int j=0; j<count; j++)
 		//coalesce
 		for(int j=tid; j<count; j+=blockDim.x)
@@ -143,17 +143,17 @@ __device__ int findMin(int m, int k, int count, int *D, int *out)
 			__syncthreads();
 		}
 		__syncthreads();
-/*
+*/
 		if(tid < count)
 		{
-			if(out[i*k+tid]-num>0 && out[i*k+tid]-num < indexBase)
+			if(out[i*k+tid]-num>=0 && out[i*k+tid]-num<indexBase)
 			{
 				SMem[ out[i*k+tid]-num ] = INIT_MAX;
 			}
-//			SMem[ out[i*k+tid] ] = INIT_MAX;
+			__syncthreads();
 		}
 		__syncthreads();
-*/
+
 		for(s=indexBase/2; s>0; s>>=1) 
 		{
 			for(int j=tid; j<indexBase; j+=blockDim.x)
