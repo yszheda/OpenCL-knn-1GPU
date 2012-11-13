@@ -16,11 +16,9 @@
 #define TILE_WIDTH 32
 #define TILE_DEPTH 128
 #define MAX_BLOCK_SIZE 256
-//#define MAX_PTRNUM_IN_SMEM 4096
-#define MAX_PTRNUM_IN_SMEM 1024
+#define MAX_PTRNUM_IN_SMEM 1024 
 
 void showResult(int m, int k, int *out);
-
 
 // compute the square of distance of the ith point and jth point
 __global__ void computeDist(int m, int n, int *V, int *D)
@@ -35,8 +33,6 @@ __global__ void computeDist(int m, int n, int *V, int *D)
 	int ty = threadIdx.y;
 	int row;
 	int col;
-//	int row = by*TILE_WIDTH+ty;
-//	int col = bx*TILE_WIDTH+tx;
 	int px;
 	int py;	
 
@@ -44,7 +40,6 @@ __global__ void computeDist(int m, int n, int *V, int *D)
 	{
 		for(px=tx; px<TILE_WIDTH; px+=blockDim.x)
 		{
-		
 			row = by*TILE_WIDTH+py;
 			col = bx*TILE_WIDTH+px;
 			dist[py][px] = 0;
@@ -75,26 +70,7 @@ __global__ void computeDist(int m, int n, int *V, int *D)
 
 extern __shared__ int SMem[];
 
-__device__ void initSMem(int m, int k, int count, int *D, int *out)
-{
-	int i = blockIdx.x;
-	int j = threadIdx.x;
-	if(j == i)
-	{
-		SMem[i] = INIT_MAX;
-	}
-	else
-	{
-		SMem[j] = D[i*m+j];
-	}
-	if(j < count)
-	{
-		SMem[ out[i*k+j] ] = INIT_MAX;
-	}
-	//index
-	SMem[j+m] = j;
-}
-
+//find the min value and index in the count^th loop
 __device__ int findMin(int m, int k, int count, int *D, int *out)
 {
 	int i = blockIdx.x;
@@ -120,31 +96,7 @@ __device__ int findMin(int m, int k, int count, int *D, int *out)
 			//index
 			SMem[indexBase+j] = j+num;
 			__syncthreads();
-/*
-			if(tid < count)
-			{
-				if(out[i*k+tid]-num>0 && out[i*k+tid]-num < indexBase)
-				{
-					SMem[ out[i*k+tid]-num ] = INIT_MAX;
-				}
-			}
-			__syncthreads();
-*/
 		}
-//		__syncthreads();
-/*
-//		for(int j=0; j<count; j++)
-		//coalesce
-		for(int j=tid; j<count; j+=blockDim.x)
-		{
-			if(out[i*k+j]-num>=0 && out[i*k+j]-num<indexBase)
-			{
-				SMem[ out[i*k+j]-num ] = INIT_MAX;
-			}
-			__syncthreads();
-		}
-		__syncthreads();
-*/
 		if(tid < count)
 		{
 			if(out[i*k+tid]-num>=0 && out[i*k+tid]-num<indexBase)
@@ -211,24 +163,6 @@ __global__ void knn(int m, int k, int *V, int *D, int *out)
 	}
 }
 
-void showD(int m, int *D)
-{
-	int i,j;
-	printf("D:\n");
-	for(i=0; i<m; i++)
-	{
-		for(j=0; j<m; j++)
-		{
-			printf("%d ", D[i*m+j]);
-			if(j == m-1)
-			{
-				printf("\n");
-			}	
-		}    	
-	}        	
-	printf("D:\n");
-}            	
-
 void showResult(int m, int k, int *out)
 {
 	int i,j;
@@ -244,6 +178,7 @@ void showResult(int m, int k, int *out)
 		}    	
 	}        	
 }            	
+
 int main(int argc, char *argv[]) 
 { 
 	int m,n,k;
@@ -251,9 +186,6 @@ int main(int argc, char *argv[])
 	int *V, *out;				//host copies
 	int *d_V, *d_out;			//device copies
 	int *D;						
-
-//int *h_D;
-
 	FILE *fp;
 	if(argc != 2)
 	{
@@ -270,26 +202,24 @@ int main(int argc, char *argv[])
 		V = (int *) malloc(m*n*sizeof(int));
 		out = (int *) malloc(m*k*sizeof(int));
 
-//h_D = (int *) malloc(m*m*sizeof(int));
-//cudaDeviceSetCacheConfig(cudaFuncCachePreferShared);	
+		for(i=0; i<m*n; i++)
+		{
+			fscanf(fp, "%d", &V[i]);
+		}
 
 		// compute the execution time
 		cudaEvent_t start, stop;
-//		// create event
-//		cudaEventCreate(&start);
-//		cudaEventCreate(&stop);
-//		// record event
-//		cudaEventRecord(start);
+		// create event
+		cudaEventCreate(&start);
+		cudaEventCreate(&stop);
+		// record event
+		cudaEventRecord(start);
 
 		// allocate space for devices copies
 		cudaMalloc((void **)&d_V, m*n*sizeof(int));
 		cudaMalloc((void **)&d_out, m*k*sizeof(int));
 		cudaMalloc((void **)&D, m*m*sizeof(int));
 
-		for(i=0; i<m*n; i++)
-		{
-			fscanf(fp, "%d", &V[i]);
-		}
 		// copy host values to devices copies
 		cudaMemcpy(d_V, V, m*n*sizeof(int), cudaMemcpyHostToDevice);
 
@@ -297,31 +227,23 @@ int main(int argc, char *argv[])
 		int gridDimY = (int)(ceil((float)m/TILE_WIDTH));
 
 		dim3 grid(gridDimX, gridDimY);
-//		dim3 grid(m, m);
-
-//		dim3 block(TILE_WIDTH/2, TILE_WIDTH/2);
 		dim3 block(TILE_WIDTH, TILE_WIDTH);
-
-		// create event
-		cudaEventCreate(&start);
-		cudaEventCreate(&stop);
-		// record event
-		cudaEventRecord(start);
 
 		// launch knn() kernel on GPU
 		computeDist<<<grid, block>>>(m, n, d_V, D);
-//		computeDist<<<grid, n, n*sizeof(int)>>>(m, n, d_V, D);
 		cudaDeviceSynchronize();
 
-//cudaMemcpy(h_D, D, m*m*sizeof(int), cudaMemcpyDeviceToHost);
-//showD(m, h_D);
-
 		int threadNum = (m<MAX_BLOCK_SIZE)? m: MAX_BLOCK_SIZE;
-//		knn<<<m, m, 2*m*sizeof(int)>>>(m, k, d_V, D, d_out);
-
 		int ptrNumInSMEM = (m<MAX_PTRNUM_IN_SMEM)? m: MAX_PTRNUM_IN_SMEM;
 		knn<<<m, threadNum, 2*ptrNumInSMEM*sizeof(int)>>>(m, k, d_V, D, d_out);
-//		knn<<<m, threadNum, 2*m*sizeof(int)>>>(m, k, d_V, D, d_out);
+
+		// copy result back to host
+		cudaMemcpy(out, d_out, m*k*sizeof(int), cudaMemcpyDeviceToHost);
+
+		// cleanup
+		cudaFree(d_V);
+		cudaFree(d_out);
+		cudaFree(D);
 
 		// record event and synchronize
 		cudaEventRecord(stop);
@@ -329,16 +251,6 @@ int main(int argc, char *argv[])
 		float time;
 		// get event elapsed time
 		cudaEventElapsedTime(&time, start, stop);
-
-		// copy result back to host
-		cudaMemcpy(out, d_out, m*k*sizeof(int), cudaMemcpyDeviceToHost);
-
-//		// record event and synchronize
-//		cudaEventRecord(stop);
-//		cudaEventSynchronize(stop);
-//		float time;
-//		// get event elapsed time
-//		cudaEventElapsedTime(&time, start, stop);
 
 		showResult(m, k, out);
 		if(m == 1024) {
@@ -350,13 +262,8 @@ int main(int argc, char *argv[])
 		}
 		printf("%f\n", time);
 
-		// cleanup
-		cudaFree(d_V);
-		cudaFree(d_out);
-		cudaFree(D);
 		free(V);
 		free(out);
-//free(h_D);
 	}
 	fclose(fp);
 	return 0;
