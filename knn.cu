@@ -16,7 +16,8 @@
 #define TILE_WIDTH 32
 #define TILE_DEPTH 128
 #define MAX_BLOCK_SIZE 256
-#define MAX_PTRNUM_IN_SMEM 4096
+//#define MAX_PTRNUM_IN_SMEM 4096
+#define MAX_PTRNUM_IN_SMEM 1024
 
 void showResult(int m, int k, int *out);
 
@@ -297,8 +298,9 @@ int main(int argc, char *argv[])
 
 		dim3 grid(gridDimX, gridDimY);
 //		dim3 grid(m, m);
-		dim3 block(TILE_WIDTH/2, TILE_WIDTH/2);
-//		dim3 block(TILE_WIDTH, TILE_WIDTH);
+
+//		dim3 block(TILE_WIDTH/2, TILE_WIDTH/2);
+		dim3 block(TILE_WIDTH, TILE_WIDTH);
 
 		// create event
 		cudaEventCreate(&start);
