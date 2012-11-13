@@ -17,7 +17,8 @@
 #define TILE_DEPTH 128
 #define MAX_BLOCK_SIZE 256
 //#define MAX_PTRNUM_IN_SMEM 4096
-#define MAX_PTRNUM_IN_SMEM 1024
+//#define MAX_PTRNUM_IN_SMEM 1024
+#define MAX_PTRNUM_IN_SMEM 2048
 
 void showResult(int m, int k, int *out);
 
