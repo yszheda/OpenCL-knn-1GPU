@@ -107,7 +107,6 @@ __device__ int findMin(int m, int k, int count, int *D, int *out)
 		}
 		__syncthreads();
 
-/*
 //		for(s=indexBase/2; s>0; s>>=1) 
 		for(s=indexBase/2; s>32; s>>=1) 
 		{
@@ -131,25 +130,22 @@ __device__ int findMin(int m, int k, int count, int *D, int *out)
 				__syncthreads();
 			}
 		}
-*/
+/*
 		if(indexBase >= 1024)
 		{
-			for(int j=tid; j<indexBase; j+=blockDim.x)
+			for(int j=tid; j<512; j+=blockDim.x)
 			{
-				if(j < 512) 
+				if(SMem[j] == SMem[j+512])
 				{
-					if(SMem[j] == SMem[j+512])
+					if(SMem[indexBase+j] > SMem[indexBase+j+512])
 					{
-						if(SMem[indexBase+j] > SMem[indexBase+j+512])
-						{
-							SMem[indexBase+j] = SMem[indexBase+j+512];
-						}
-					}
-					else if(SMem[j] > SMem[j+512])
-					{
-						SMem[j] = SMem[j+512];
 						SMem[indexBase+j] = SMem[indexBase+j+512];
 					}
+				}
+				else if(SMem[j] > SMem[j+512])
+				{
+					SMem[j] = SMem[j+512];
+					SMem[indexBase+j] = SMem[indexBase+j+512];
 				}
 				__syncthreads();
 			}
@@ -157,22 +153,19 @@ __device__ int findMin(int m, int k, int count, int *D, int *out)
 
 		if(indexBase >= 512)
 		{
-			for(int j=tid; j<indexBase; j+=blockDim.x)
+			for(int j=tid; j<256; j+=blockDim.x)
 			{
-				if(j < 256) 
+				if(SMem[j] == SMem[j+256])
 				{
-					if(SMem[j] == SMem[j+256])
+					if(SMem[indexBase+j] > SMem[indexBase+j+256])
 					{
-						if(SMem[indexBase+j] > SMem[indexBase+j+256])
-						{
-							SMem[indexBase+j] = SMem[indexBase+j+256];
-						}
-					}
-					else if(SMem[j] > SMem[j+256])
-					{
-						SMem[j] = SMem[j+256];
 						SMem[indexBase+j] = SMem[indexBase+j+256];
 					}
+				}
+				else if(SMem[j] > SMem[j+256])
+				{
+					SMem[j] = SMem[j+256];
+					SMem[indexBase+j] = SMem[indexBase+j+256];
 				}
 				__syncthreads();
 			}
@@ -180,22 +173,19 @@ __device__ int findMin(int m, int k, int count, int *D, int *out)
 
 		if(indexBase >= 256)
 		{
-			for(int j=tid; j<indexBase; j+=blockDim.x)
+			for(int j=tid; j<128; j+=blockDim.x)
 			{
-				if(j < 128) 
+				if(SMem[j] == SMem[j+128])
 				{
-					if(SMem[j] == SMem[j+128])
+					if(SMem[indexBase+j] > SMem[indexBase+j+128])
 					{
-						if(SMem[indexBase+j] > SMem[indexBase+j+128])
-						{
-							SMem[indexBase+j] = SMem[indexBase+j+128];
-						}
-					}
-					else if(SMem[j] > SMem[j+128])
-					{
-						SMem[j] = SMem[j+128];
 						SMem[indexBase+j] = SMem[indexBase+j+128];
 					}
+				}
+				else if(SMem[j] > SMem[j+128])
+				{
+					SMem[j] = SMem[j+128];
+					SMem[indexBase+j] = SMem[indexBase+j+128];
 				}
 				__syncthreads();
 			}
@@ -203,28 +193,24 @@ __device__ int findMin(int m, int k, int count, int *D, int *out)
 
 		if(indexBase >= 128)
 		{
-			for(int j=tid; j<indexBase; j+=blockDim.x)
+			for(int j=tid; j<64; j+=blockDim.x)
 			{
-				if(tid < 64) 
+				if(SMem[j] == SMem[j+64])
 				{
-					if(SMem[j] == SMem[j+64])
+					if(SMem[indexBase+j] > SMem[indexBase+j+64])
 					{
-						if(SMem[indexBase+j] > SMem[indexBase+j+64])
-						{
-							SMem[indexBase+j] = SMem[indexBase+j+64];
-						}
-					}
-					else if(SMem[j] > SMem[j+64])
-					{
-						SMem[j] = SMem[j+64];
 						SMem[indexBase+j] = SMem[indexBase+j+64];
 					}
+				}
+				else if(SMem[j] > SMem[j+64])
+				{
+					SMem[j] = SMem[j+64];
+					SMem[indexBase+j] = SMem[indexBase+j+64];
 				}
 				__syncthreads();
 			}
 		}
-
-		__syncthreads();
+*/
 		if(tid < 32)
 		{
 			/*
