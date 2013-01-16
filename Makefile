@@ -1,50 +1,47 @@
-################################################################################
-#
-# Copyright 1993-2009 NVIDIA Corporation.  All rights reserved.
-#
-# NOTICE TO USER:   
-#
-# This source code is subject to NVIDIA ownership rights under U.S. and 
-# international Copyright laws.  
-#
-# NVIDIA MAKES NO REPRESENTATION ABOUT THE SUITABILITY OF THIS SOURCE 
-# CODE FOR ANY PURPOSE.  IT IS PROVIDED "AS IS" WITHOUT EXPRESS OR 
-# IMPLIED WARRANTY OF ANY KIND.  NVIDIA DISCLAIMS ALL WARRANTIES WITH 
-# REGARD TO THIS SOURCE CODE, INCLUDING ALL IMPLIED WARRANTIES OF 
-# MERCHANTABILITY, NONINFRINGEMENT, AND FITNESS FOR A PARTICULAR PURPOSE.   
-# IN NO EVENT SHALL NVIDIA BE LIABLE FOR ANY SPECIAL, INDIRECT, INCIDENTAL, 
-# OR CONSEQUENTIAL DAMAGES, OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS 
-# OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE 
-# OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE 
-# OR PERFORMANCE OF THIS SOURCE CODE.  
-#
-# U.S. Government End Users.  This source code is a "commercial item" as 
-# that term is defined at 48 C.F.R. 2.101 (OCT 1995), consisting  of 
-# "commercial computer software" and "commercial computer software 
-# documentation" as such terms are used in 48 C.F.R. 12.212 (SEPT 1995) 
-# and is provided to the U.S. Government only as a commercial end item.  
-# Consistent with 48 C.F.R.12.212 and 48 C.F.R. 227.7202-1 through 
-# 227.7202-4 (JUNE 1995), all U.S. Government End Users acquire the 
-# source code with only those rights set forth herein.
-#
-################################################################################
-#
-# Build script for project
-#
-################################################################################
-
+NVCC = nvcc
+CC = g++
 # Add source files here
 EXECUTABLE	:= oclKnn
 # C/C++ source files (compiled with gcc / c++)
 CCFILES		:= oclKnn.cpp
 
-################################################################################
-# Rules and targets
+# detect if 32 bit or 64 bit system
+HP_64 =	$(shell uname -m | grep 64)
+OSARCH= $(shell uname -m)
+# architecture flag for nvcc and gcc compilers build
+LIB_ARCH        := $(OSARCH)
+# Determining the necessary Cross-Compilation Flags
+# 32-bit OS, but we target 64-bit cross compilation
+ifeq ($(x86_64),1)
+    LIB_ARCH         = x86_64
 
-# NOTE: Assuming P4 based install until OpenCL becomes public
-# Adjust P4_Root, default is ${HOME}/perforce/
-# P4_ROOT=${HOME}/myperforce/
+else
+# 64-bit OS, and we target 32-bit cross compilation
+    ifeq ($(i386),1)
+        LIB_ARCH         = i386
+    else
+        ifeq "$(strip $(HP_64))" ""
+            LIB_ARCH        = i386
+        else
+            LIB_ARCH        = x86_64
+        endif
+    endif
+endif
 
-include ../../common/common_opencl.mk
+SDKDIR = ../../NVIDIA_GPU_Computing_SDK
+SHAREDDIR  := $(SDKDIR)/shared
+OCLROOTDIR := $(SDKDIR)/OpenCL
+OCLCOMMONDIR ?= $(OCLROOTDIR)/common
+OCLLIBDIR    := $(OCLCOMMONDIR)/lib
 
+INCLUDES = -I$(OCLCOMMONDIR)/inc -I$(SHAREDDIR)/inc
 
+LIB := -L${OCLLIBDIR} -L$(SHAREDDIR)/lib
+LIB += -lOpenCL -loclUtil_$(LIB_ARCH)$(LIBSUFFIX) -lshrutil_$(LIB_ARCH) ${LIB} -lrt
+
+CFLAGS += $(INCLUDES) $(LIB)
+
+$(EXECUTABLE):
+	$(CC) -o $@ $(CCFILES) $(CFLAGS)
+clean:
+	rm $(EXECUTABLE)

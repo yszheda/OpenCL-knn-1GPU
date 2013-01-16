@@ -1,14 +1,13 @@
-# k-nearest neighbor using CUDA
+# k-nearest neighbor using OpenCL
 
-the program will generate "time.txt" to store the GPU execution time
-more details about the algorithm design please read doc/design.pdf
+The program will generate "oclKnn.txt" to store the result and the GPU execution time.
+If the directory of NVIDIA SDK is changed, set SDKDIR in Makefile to point to the correct path.
 
 ## Compile the program
 	$ make
 
 ## Execute the program
-	$ chmod +x ./knn.o
-	$ ./knn.o <inputfile>
+	$ ./oclKnn <inputfile>
 
 
 Shuai YUAN <yszheda@gmail.com>
