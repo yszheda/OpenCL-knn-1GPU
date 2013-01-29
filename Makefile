@@ -37,7 +37,7 @@ OCLLIBDIR    := $(OCLCOMMONDIR)/lib
 INCLUDES = -I$(OCLCOMMONDIR)/inc -I$(SHAREDDIR)/inc
 
 LIB := -L${OCLLIBDIR} -L$(SHAREDDIR)/lib
-LIB += -lOpenCL -loclUtil_$(LIB_ARCH)$(LIBSUFFIX) -lshrutil_$(LIB_ARCH) ${LIB} -lrt
+LIB += -lOpenCL -loclUtil_$(LIB_ARCH) -lshrutil_$(LIB_ARCH) ${LIB} -lrt
 
 CFLAGS += $(INCLUDES) $(LIB)
 
